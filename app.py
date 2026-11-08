@@ -21,7 +21,7 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-# ─── Custom CSS (Unchanged - it's perfect) ──────────────────────────────────────
+# ─── Custom CSS ─────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@300;400;500&display=swap');
@@ -175,14 +175,11 @@ def _md_to_safe_html(text) -> str:
     text = text.replace("\n", "<br>")
     return text
 
-# ─── Pre-flight check: Fixed for Groq & Gemini ─────────────────────────────────
+# ─── Pre-flight check ──────────────────────────────────────────────────────────
 def _preflight_check(language: str) -> list:
-    """Verify Groq and Gemini API keys are present."""
     issues = []
-    
     if not os.getenv("GROQ_API_KEY"):
         issues.append("❌ `GROQ_API_KEY` is missing. Transcription will fail.")
-        
     if not os.getenv("GOOGLE_API_KEY"):
         issues.append("❌ `GOOGLE_API_KEY` is missing. LLM and Embeddings will fail.")
 
@@ -190,10 +187,7 @@ def _preflight_check(language: str) -> list:
         try:
             import indic_transliteration  # noqa: F401
         except ImportError:
-            issues.append(
-                "❌ `indic-transliteration` not installed — Hinglish output "
-                "will stay in Devanagari. Fix: `pip install indic-transliteration`"
-            )
+            issues.append("❌ `indic-transliteration` not installed — Hinglish output will fail.")
 
     return issues
 
@@ -230,10 +224,22 @@ with st.sidebar:
     st.markdown("---")
 
     st.markdown('<span class="badge badge-purple">Input</span>', unsafe_allow_html=True)
-    source = st.text_input("YouTube URL or File Path", placeholder="https://youtube.com/watch?v=... or /path/to/file.mp4")
+    
+    # 📂 FILE UPLOADER (Reliable Fallback)
+    uploaded_file = st.file_uploader("Upload Audio/Video (Recommended)", type=["mp3", "wav", "mp4", "m4a"])
+    
+    # 🔗 YOUTUBE URL (If not blocked)
+    source = st.text_input("Or paste YouTube URL", placeholder="https://youtube.com/watch?v=...")
+
+    # Handle Uploaded File
+    if uploaded_file is not None:
+        os.makedirs("downloades", exist_ok=True)
+        source = os.path.join("downloades", uploaded_file.name)
+        with open(source, "wb") as f:
+            f.write(uploaded_file.getbuffer())
+        st.success(f"File ready: {uploaded_file.name}")
 
     language = st.selectbox("Language", ["english", "hinglish"], index=0)
-
     run_btn = st.button("⚡  Analyse", use_container_width=True)
 
     if st.session_state.pipeline_done:
@@ -257,14 +263,13 @@ st.markdown("---")
 # ── Run Pipeline ────────────────────────────────────────────────────────────────
 if run_btn:
     if not source.strip():
-        st.error("Please enter a YouTube URL or file path.")
+        st.error("Please upload a file or enter a YouTube URL.")
     else:
         st.session_state.pipeline_done = False
         st.session_state.result = None
         st.session_state.chat_history = []
         st.session_state.pipeline_steps = {}
 
-        # Pre-flight warnings (visible BEFORE the long downloads start)
         issues = _preflight_check(language)
         if issues:
             with st.expander("⚠️ Pre-flight notices", expanded=True):
@@ -276,49 +281,30 @@ if run_btn:
 
         try:
             with st.status("⚙️ Running pipeline…", expanded=True) as status:
-                # ── 1. Audio ─────────────────────────────────────────────
+                # 1. Audio
                 t0 = time.time()
                 update_step("audio", "active")
-                st.write("🔊 **[1/6]** Downloading / converting / chunking audio…")
+                st.write("🔊 **[1/6]** Processing audio…")
                 chunks = process_input(source)
                 update_step("audio", "done")
                 st.write(f"&nbsp;&nbsp;&nbsp;✅ {len(chunks)} chunk(s) ready ({time.time()-t0:.1f}s)")
 
-                # ── 2. Transcribe ────────────────────────────────────────
+                # 2. Transcribe
                 t0 = time.time()
                 update_step("transcript", "active")
-                st.write(f"📝 **[2/6]** Transcribing {len(chunks)} chunk(s) via Groq API…")
-                st.caption("⚡ API transcription via Groq `whisper-large-v3`.")
-
+                st.write(f"📝 **[2/6]** Transcribing {len(chunks)} chunk(s) via Groq…")
                 progress_bar = st.progress(0, text="⏳ Preparing transcription…")
-                elapsed_ph = st.empty()
-
+                
                 def _prog(done, total, phase):
-                    elapsed = time.time() - t0
                     pct = int(done / total * 100) if total else 0
-                    if phase == "transcribing":
-                        progress_bar.progress(
-                            pct,
-                            text=f"⏳ Chunk {done}/{total} uploading + transcribing… ({elapsed:.0f}s elapsed)",
-                        )
-                    elif phase == "done":
-                        progress_bar.progress(
-                            pct,
-                            text=f"✅ Chunk {done}/{total} done ({elapsed:.0f}s elapsed)",
-                        )
-                    elif phase == "transliterating":
-                        progress_bar.progress(
-                            100,
-                            text=f"🔄 Transliterating Devanagari → Hinglish… ({elapsed:.0f}s)",
-                        )
+                    progress_bar.progress(pct, text=f"⏳ Chunk {done}/{total} transcribing…")
 
                 transcript = transcribe_all(chunks, language, progress_callback=_prog)
                 progress_bar.empty()
-                elapsed_ph.empty()
                 update_step("transcript", "done")
                 st.write(f"&nbsp;&nbsp;&nbsp;✅ {len(transcript)} chars transcribed ({time.time()-t0:.1f}s)")
 
-                # ── 3. Title ─────────────────────────────────────────────
+                # 3. Title
                 t0 = time.time()
                 update_step("title", "active")
                 st.write("🏷️ **[3/6]** Generating title via Gemini…")
@@ -326,7 +312,7 @@ if run_btn:
                 update_step("title", "done")
                 st.write(f"&nbsp;&nbsp;&nbsp;✅ “{title}” ({time.time()-t0:.1f}s)")
 
-                # ── 4. Summary ───────────────────────────────────────────
+                # 4. Summary
                 t0 = time.time()
                 update_step("summary", "active")
                 st.write("📋 **[4/6]** Summarising (chunked map-reduce)…")
@@ -334,23 +320,20 @@ if run_btn:
                 update_step("summary", "done")
                 st.write(f"&nbsp;&nbsp;&nbsp;✅ Summary ready ({time.time()-t0:.1f}s)")
 
-                # ── 5. Extraction ────────────────────────────────────────
+                # 5. Extraction
                 t0 = time.time()
                 update_step("extract", "active")
                 st.write("🔍 **[5/6]** Extracting action items → decisions → questions…")
                 action_items = extract_action_items(transcript, language)
-                st.write("&nbsp;&nbsp;&nbsp;· action items done")
                 decisions = extract_key_decisions(transcript, language)
-                st.write("&nbsp;&nbsp;&nbsp;· decisions done")
                 questions = extract_questions(transcript, language)
-                st.write("&nbsp;&nbsp;&nbsp;· questions done")
                 update_step("extract", "done")
                 st.write(f"&nbsp;&nbsp;&nbsp;✅ Extraction complete ({time.time()-t0:.1f}s)")
 
-                # ── 6. RAG ───────────────────────────────────────────────
+                # 6. RAG
                 t0 = time.time()
                 update_step("rag", "active")
-                st.write("🧠 **[6/6]** Building RAG index via Gemini embeddings…")
+                st.write("🧠 **[6/6]** Building RAG index…")
                 rag_chain = build_rag_chain(transcript, language)
                 update_step("rag", "done")
                 st.write(f"&nbsp;&nbsp;&nbsp;✅ RAG ready ({time.time()-t0:.1f}s)")
@@ -468,7 +451,7 @@ if st.session_state.result:
     if send_btn and user_input.strip():
         with st.spinner("Thinking…"):
             answer = ask_question(r["rag_chain"], user_input.strip())
-        st.session_state.chat_history.append({"role": "user",      "content": user_input.strip()})
+        st.session_state.chat_history.append({"role": "user", "content": user_input.strip()})
         st.session_state.chat_history.append({"role": "assistant", "content": answer})
         st.rerun()
 
@@ -485,7 +468,7 @@ else:
             Ready to Analyse
         </div>
         <div style="color:var(--text-muted);font-size:0.85rem;max-width:380px;line-height:1.7">
-            Paste a YouTube URL or local file path in the sidebar, choose your language, and hit <strong>Analyse</strong> to get started.
+            Upload an audio/video file or paste a YouTube URL in the sidebar, choose your language, and hit <strong>Analyse</strong> to get started.
         </div>
         <div style="margin-top:2rem;display:flex;gap:1rem;flex-wrap:wrap;justify-content:center">
             <span class="badge badge-purple">Transcription</span>

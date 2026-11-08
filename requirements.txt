@@ -28,3 +28,7 @@ numpy>=1.26.0
 tqdm>=4.66.0
 requests>=2.32.0
 indic-transliteration>=2.3.7
+
+yt-dlp[default]
+curl_cffi
+audioop-lts

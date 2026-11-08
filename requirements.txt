@@ -31,4 +31,3 @@ indic-transliteration>=2.3.7
 
 yt-dlp[default]
 curl_cffi
-audioop-lts

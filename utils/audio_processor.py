@@ -10,7 +10,7 @@ MAX_CHUNK_MB = 23.0
 def download_youtube_audio(url: str) -> str:
     output_path = os.path.join(DOWNLOAD_DIR, "%(title)s.%(ext)s")
     
-    # Setup browser impersonation and JS runtime args
+    # Setup browser impersonation and JS runtime args (switched to Node.js)
     ydl_opts = {
         "format": "bestaudio/best",
         "outtmpl": output_path,
@@ -23,6 +23,7 @@ def download_youtube_audio(url: str) -> str:
         "no_warnings": True,
         "force_ipv4": True,
         "impersonate": "chrome",  # Bypasses TLS fingerprinting
+        "js_runtimes": {"node": {}},  # Tells yt-dlp to use Node.js
         "extractor_args": {
             "youtube": {
                 "player_client": ["tv", "mweb", "web_safari"], # Bypasses bot checks
